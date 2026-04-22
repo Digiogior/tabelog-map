@@ -28,5 +28,30 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Project binaries
+tabelog-api
+tabelog-api-*
+tabelog-crawler
+scraper
+
+# Database files
+*.db
+db-data/
+18/
+
+# Data files
+*.sql
+*.csv
+
+# Mapbox token
+map/config.js
+
+# Markdown (except README)
+*.md
+!README.md

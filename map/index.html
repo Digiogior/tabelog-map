@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mapbox GL JS map</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.js"></script>
+<style>
+body { margin: 0; padding: 0; }
+#map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+.category-filter {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  background: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  width: 220px;
+}
+
+.category-filter input {
+  font-size: 14px;
+  border: none;
+  outline: none;
+  width: 100%;
+  background: transparent;
+}
+
+.category-filter input::placeholder {
+  color: #aaa;
+}
+
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 2;
+}
+
+.autocomplete-item {
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+  background: #f0f0f0;
+}
+
+
+/* Bottom sheet */
+#bottom-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+  padding: 12px 20px 32px;
+  z-index: 10;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+}
+
+#bottom-sheet.open {
+  transform: translateY(0);
+}
+
+.bs-handle {
+  width: 40px;
+  height: 4px;
+  background: #ddd;
+  border-radius: 2px;
+  margin: 0 auto 14px;
+}
+
+.bs-name {
+  font-size: 17px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.bs-name a {
+  color: #e74c3c;
+  text-decoration: none;
+}
+
+.bs-address {
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 6px;
+}
+
+.bs-categories {
+  font-size: 13px;
+  color: #e74c3c;
+  margin-bottom: 6px;
+}
+
+.bs-meta {
+  font-size: 14px;
+  color: #333;
+  margin-top: 4px;
+}
+
+@media (max-width: 600px) {
+  .category-filter {
+    top: 0;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: 100%;
+    border-radius: 0;
+    padding: 12px 16px;
+    box-sizing: border-box;
+  }
+
+  .category-filter input {
+    font-size: 16px;
+    padding: 4px 0;
+  }
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script src="config.js"></script>
+<script src="map.js"></script>
+
+</body>
+</html>
