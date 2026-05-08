@@ -17,4 +17,5 @@ type Restaurant struct {
 	Categories     []string
 	City           string
 	Kids           string
+	Photos         []string
 }

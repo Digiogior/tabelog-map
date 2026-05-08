@@ -28,7 +28,7 @@ DSN = os.environ.get("DATABASE_URL", "postgres://postgres:password@localhost:543
 MODEL = "gcp/google/gemini-3-flash-preview"
 MAX_PHOTOS = 20
 DELAY = 1.5
-VLM_WORKERS = 4
+VLM_WORKERS = 8
 MAX_RETRIES = 3  # stop retrying a restaurant after this many errors
 
 HEADERS = {
@@ -379,6 +379,8 @@ def main():
   parser = argparse.ArgumentParser(description="Scrape menu items for all restaurants in DB")
   parser.add_argument("--retry-errors", action="store_true",
                       help="retry restaurants that previously failed (up to MAX_RETRIES times)")
+  parser.add_argument("--offset", type=int, default=0,
+                      help="skip the first N pending restaurants (for splitting work across machines)")
   parser.add_argument("--limit", type=int, default=0,
                       help="stop after processing this many restaurants (0 = no limit)")
   args = parser.parse_args()
@@ -389,6 +391,10 @@ def main():
   pending = get_pending_restaurants(conn, retry_errors=args.retry_errors)
   total = len(pending)
   print(f"Pending restaurants: {total}")
+
+  if args.offset:
+    pending = pending[args.offset:]
+    print(f"Skipping first {args.offset} (starting at index {args.offset})")
 
   if args.limit:
     pending = pending[:args.limit]

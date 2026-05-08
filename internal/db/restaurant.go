@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,7 +10,12 @@ import (
 )
 
 func CreateTables(db *sql.DB) error {
-	_, err := db.Exec(`
+	_, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS postgis`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS restaurants (
 			id BIGSERIAL PRIMARY KEY,
 			name TEXT,
@@ -29,6 +35,35 @@ func CreateTables(db *sql.DB) error {
 			kids TEXT
 		)
 	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_restaurants_city ON restaurants(city)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS photos TEXT`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS location geometry(Point, 4326)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		UPDATE restaurants
+		SET location = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+		WHERE location IS NULL AND longitude != 0 AND latitude != 0
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_restaurants_location ON restaurants USING GIST (location)`)
 	if err != nil {
 		return err
 	}
@@ -53,7 +88,63 @@ func CreateTables(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS cities (
+			id           BIGSERIAL PRIMARY KEY,
+			prefecture   TEXT UNIQUE NOT NULL,
+			display_name TEXT NOT NULL,
+			lat          DOUBLE PRECISION NOT NULL,
+			lng          DOUBLE PRECISION NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
 	return CreateMenuTables(db)
+}
+
+func GetCities(db *sql.DB) ([]map[string]interface{}, error) {
+	rows, err := db.Query(`SELECT prefecture, display_name, lat, lng FROM cities ORDER BY display_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cities []map[string]interface{}
+	for rows.Next() {
+		var prefecture, displayName string
+		var lat, lng float64
+		if err := rows.Scan(&prefecture, &displayName, &lat, &lng); err != nil {
+			return nil, err
+		}
+		cities = append(cities, map[string]interface{}{
+			"prefecture":   prefecture,
+			"display_name": displayName,
+			"lat":          lat,
+			"lng":          lng,
+		})
+	}
+	return cities, rows.Err()
+}
+
+func marshalPhotos(photos []string) *string {
+	if len(photos) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(photos)
+	s := string(b)
+	return &s
+}
+
+func unmarshalPhotos(s *string) []string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	var photos []string
+	json.Unmarshal([]byte(*s), &photos)
+	return photos
 }
 
 func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
@@ -61,19 +152,21 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 
 	err := db.QueryRow(`
 		INSERT INTO restaurants (
-			name, address, alias, pillow, url, rating, latitude, longitude,
+			name, address, alias, pillow, url, rating, latitude, longitude, location,
 			lunch_min_price, lunch_max_price,
 			dinner_min_price, dinner_max_price,
-			nearest_station, city, kids
+			nearest_station, city, kids, photos
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8,
-			$9, $10, $11, $12, $13, $14, $15
+			$1, $2, $3, $4, $5, $6, $7, $8, ST_SetSRID(ST_MakePoint($8, $7), 4326),
+			$9, $10, $11, $12, $13, $14, $15, $16
 		)
 		ON CONFLICT (url)
 		DO UPDATE SET
 			name = EXCLUDED.name,
 			address = EXCLUDED.address,
-			kids = EXCLUDED.kids
+			kids = EXCLUDED.kids,
+			photos = EXCLUDED.photos,
+			location = EXCLUDED.location
 		RETURNING id;
 	`,
 		r.Name,
@@ -91,6 +184,7 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 		r.NearestStation,
 		r.City,
 		r.Kids,
+		marshalPhotos(r.Photos),
 	).Scan(&restaurantID)
 
 	if err != nil {
@@ -145,12 +239,37 @@ func GetCategories(db *sql.DB) ([]string, error) {
 	return categories, rows.Err()
 }
 
-func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, category string) ([]models.Restaurant, error) {
+func GetTopCategories(db *sql.DB, limit int) ([]string, error) {
+	rows, err := db.Query(`
+		SELECT c.name
+		FROM categories c
+		JOIN restaurant_categories rc ON rc.category_id = c.id
+		GROUP BY c.name
+		ORDER BY COUNT(rc.restaurant_id) DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		categories = append(categories, name)
+	}
+	return categories, rows.Err()
+}
+
+func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, category, prefecture string) ([]models.Restaurant, error) {
 	query := `
 		SELECT r.name, r.address, r.url, r.rating, r.latitude, r.longitude,
 		       r.lunch_min_price, r.lunch_max_price,
 		       r.dinner_min_price, r.dinner_max_price,
-		       r.nearest_station, r.city, r.kids, r.id
+		       r.nearest_station, r.city, r.kids, r.photos, r.id
 		FROM restaurants r
 	`
 	args := []interface{}{lng, lat, radiusMeters}
@@ -165,11 +284,16 @@ func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, catego
 
 	query += `
 		WHERE ST_DWithin(
-		    ST_MakePoint(r.longitude, r.latitude)::geography,
-		    ST_MakePoint($1, $2)::geography,
+		    r.location::geography,
+		    ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
 		    $3
 		)
 	`
+
+	if prefecture != "" {
+		args = append(args, prefecture)
+		query += fmt.Sprintf("AND r.city = $%d\n", len(args))
+	}
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -185,6 +309,7 @@ func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, catego
 	for rows.Next() {
 		var id int64
 		var r models.Restaurant
+		var photos *string
 		err := rows.Scan(
 			&r.Name,
 			&r.Address,
@@ -199,11 +324,13 @@ func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, catego
 			&r.NearestStation,
 			&r.City,
 			&r.Kids,
+			&photos,
 			&id,
 		)
 		if err != nil {
 			return nil, err
 		}
+		r.Photos = unmarshalPhotos(photos)
 		rows2 = append(rows2, restaurantWithID{id, r})
 	}
 	if err := rows.Err(); err != nil {

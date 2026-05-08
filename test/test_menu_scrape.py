@@ -24,7 +24,7 @@ client = OpenAI(
 MODEL = "gcp/google/gemini-3-flash-preview"
 MAX_PHOTOS = 20
 DELAY = 1.5       # seconds between Tabelog HTML requests
-VLM_WORKERS = 4   # concurrent VLM calls per restaurant
+VLM_WORKERS = 8   # concurrent VLM calls per restaurant
 
 HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
