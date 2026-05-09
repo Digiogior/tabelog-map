@@ -1,6 +1,28 @@
 # tabelog-map
 
-An interactive map that displays restaurants in the Nagoya/Aichi area sourced from [Tabelog](https://tabelog.com). It crawls restaurant data, stores it in PostgreSQL with PostGIS, and renders nearby restaurants as markers on a Mapbox map.
+An interactive map of Japanese restaurants sourced from [Tabelog](https://tabelog.com/tw/), covering multiple cities across Japan. The scraper crawls restaurant data at prefecture scale, stores it in PostgreSQL with PostGIS for geo queries, and renders nearby restaurants as markers on a Mapbox map.
+
+**Current data:**
+| Prefecture | Restaurants |
+|---|---|
+| Tokyo | ~132,000 |
+| Osaka | ~57,000 |
+| Aichi (Nagoya + surroundings) | ~16,000+ |
+
+---
+
+## How it works
+
+```
+Tabelog (tw)
+  └─ Prefecture page  →  fetchAreaPaths
+       └─ Areas (A2701…)  →  fetchSubAreaPaths + fetchCategoryPaths
+            └─ Restaurant listing pages (paginated, per category)
+                 └─ Individual restaurant URLs  →  {Prefecture}RstUrls.csv
+                      └─ Detail pages  →  PostgreSQL (restaurants table)
+```
+
+The scraper bypasses Tabelog's 60-page-per-listing cap by crawling each food-type category separately, then deduplicating across all paths.
 
 ---
 
@@ -10,28 +32,27 @@ An interactive map that displays restaurants in the Nagoya/Aichi area sourced fr
 tabelog-map/
 ├── cmd/
 │   ├── api/
-│   │   └── main.go         ← API server entry point
+│   │   └── main.go              ← API server entry point
 │   └── scraper/
-│       └── main.go         ← Scraper entry point
+│       └── main.go              ← Scraper entry point (URL collection + detail scraping)
 ├── internal/
 │   ├── api/
-│   │   └── server.go       ← HTTP handlers
+│   │   └── server.go            ← HTTP handlers
 │   ├── service/
-│   │   └── restaurant.go   ← Business logic
+│   │   └── restaurant.go        ← Business logic
 │   ├── db/
-│   │   └── restaurant.go   ← SQL queries
+│   │   └── restaurant.go        ← SQL queries
 │   └── scraper/
-│       ├── crawler.go      ← Tabelog crawling logic
-│       └── progress.go     ← Crawl progress tracking
+│       ├── crawler.go           ← Tabelog crawling logic (multi-city, concurrent)
+│       └── progress.go          ← Crawl progress tracking
 ├── map/
-│   ├── index.html          ← Frontend
-│   └── map.js              ← Mapbox map + API integration
+│   ├── index.html               ← Frontend
+│   └── map.js                   ← Mapbox map + API integration
 ├── models/
-│   └── restaurant.go       ← Restaurant struct
-├── NagoyaRstUrls.csv       ← Collected restaurant URLs
-├── tabelogUrls.csv         ← Listing page URLs to crawl
-├── crawl_progress.csv      ← Crawl progress tracker (auto-created)
-└── docker-compose.yml      ← PostgreSQL + PostGIS
+│   └── restaurant.go            ← Restaurant struct
+├── menu_scraper.py              ← VLM-based menu item scraper (optional)
+├── {Prefecture}RstUrls.csv      ← Collected restaurant URLs per city
+└── docker-compose.yml           ← PostgreSQL + PostGIS
 ```
 
 ---
@@ -39,7 +60,8 @@ tabelog-map/
 ## Requirements
 
 - Go 1.24+
-- Docker
+- Docker (for PostgreSQL + PostGIS)
+- Python 3.10+ (optional, for menu scraping)
 
 ---
 
@@ -51,46 +73,48 @@ tabelog-map/
 docker compose up -d
 ```
 
-### 2. Collect restaurant URLs
-
-**Option A** — Crawl all sub-areas of a city:
-```bash
-# Uncomment scraper.FetchRstUrls(...) in cmd/scraper/main.go
-go run cmd/scraper/main.go
-```
-
-**Option B** — Crawl from a custom list of listing page URLs in `tabelogUrls.csv`:
-```bash
-# Uncomment scraper.FetchRstUrlsFromCSV(...) in cmd/scraper/main.go
-go run cmd/scraper/main.go
-```
-
-`tabelogUrls.csv` format:
-```
-urls
-https://tabelog.com/tw/aichi/A2301/rstLst/?SrtT=rt
-https://tabelog.com/tw/aichi/A2301/rstLst/?SrtT=inbound_access
-```
-
-Collected URLs are saved to `NagoyaRstUrls.csv`.
-
-### 3. Crawl restaurant info and populate the database
+### 2. Collect restaurant URLs for a city
 
 ```bash
-go run cmd/scraper/main.go
+go run cmd/scraper/main.go --prefecture tokyo --collect-urls
+# Output: TokyoRstUrls.csv
+
+go run cmd/scraper/main.go --prefecture osaka --collect-urls
+# Output: OsakaRstUrls.csv
+
+go run cmd/scraper/main.go --prefecture aichi --collect-urls
+# Output: AichiRstUrls.csv
 ```
 
-Progress is tracked in `crawl_progress.csv`. If the process is interrupted, re-running the command will **resume from where it left off**, skipping already completed URLs.
+The `--prefecture` value is the slug from the Tabelog URL: `https://tabelog.com/tw/{prefecture}/`.
 
-To retry URLs that previously failed:
+### 3. Scrape restaurant details into the database
+
 ```bash
-go run cmd/scraper/main.go -retry-errors
+go run cmd/scraper/main.go --prefecture osaka --db "postgres://postgres:password@localhost:5432/nagoya"
 ```
+
+Progress is tracked in the `scrape_progress` table. Re-running resumes from where it left off. To retry failed URLs:
+
+```bash
+go run cmd/scraper/main.go --prefecture osaka --db "..." --retry-errors
+```
+
+**Scraper flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--prefecture` | *(required)* | Prefecture slug, e.g. `tokyo`, `osaka`, `aichi` |
+| `--urls-file` | `{Prefecture}RstUrls.csv` | Input CSV of restaurant URLs |
+| `--db` | `DATABASE_URL` env or localhost | PostgreSQL DSN |
+| `--workers` | `10` | Concurrent scrape workers |
+| `--collect-urls` | false | Run URL collection only, then exit |
+| `--retry-errors` | false | Retry previously failed URLs |
 
 ### 4. Start the API server
 
 ```bash
-go run cmd/api/main.go
+DATABASE_URL="postgres://postgres:password@localhost:5432/nagoya" go run cmd/api/main.go
 ```
 
 The API listens on `:8080`.
@@ -99,27 +123,47 @@ The API listens on `:8080`.
 
 Open `map/index.html` in a browser. The map will:
 - Request your current location
-- Fetch restaurants within 6km and render them as markers
-- Show name, address, rating, kids info, and a link to Tabelog on marker click
-- Allow filtering by category via the dropdown
+- Fetch restaurants within 1.5km and render them as clustered markers
+- Show name, address, rating, price range, photos, and links to Tabelog and Google Maps on tap
+- Filter by category via the chip bar (top categories shown inline; full list via "More")
 
 ---
 
 ## API
 
-### `GET /api/restaurants?lat=&lng=&category=`
+### `GET /api/restaurants?lat=&lng=&category=&prefecture=`
 
-Returns restaurants within 6km of the given coordinates.
+Returns restaurants within 1.5km of the given coordinates.
 
 | Parameter | Required | Description |
 |---|---|---|
 | `lat` | Yes | Latitude |
 | `lng` | Yes | Longitude |
 | `category` | No | Filter by category name |
+| `prefecture` | No | Limit to one city (e.g. `tokyo`) |
 
 ### `GET /api/categories`
 
-Returns all available restaurant categories.
+Returns all category names.
+
+### `GET /api/categories/top`
+
+Returns the 10 most-represented categories by restaurant count.
+
+---
+
+## Adding a new city
+
+```bash
+# 1. Collect URLs
+go run cmd/scraper/main.go --prefecture kyoto --collect-urls
+
+# 2. Scrape details
+go run cmd/scraper/main.go --prefecture kyoto --db "postgres://..."
+
+# 3. Register in the cities table (for the city selector UI)
+psql $DATABASE_URL -c "INSERT INTO cities (prefecture, display_name, lat, lng) VALUES ('kyoto', 'Kyoto', 35.0116, 135.7681);"
+```
 
 ---
 
