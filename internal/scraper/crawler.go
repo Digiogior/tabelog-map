@@ -1,14 +1,10 @@
 package scraper
 
 import (
-	"encoding/csv"
 	"errors"
 	"fmt"
-	"log"
-	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"tabelog-map/models"
 	"time"
 
@@ -18,345 +14,11 @@ import (
 // ErrRateLimited is returned by FetchRstInfo when the server responds with HTTP 429.
 var ErrRateLimited = errors.New("rate limited (HTTP 429)")
 
-const (
-	discoverWorkers = 3 // concurrent area path discovery
-	crawlWorkers    = 3 // concurrent restaurant-listing crawlers
-)
-
 func newCollector(delay time.Duration) *colly.Collector {
 	c := colly.NewCollector(colly.AllowedDomains("tabelog.com"))
 	c.Limit(&colly.LimitRule{DomainGlob: "*", Delay: delay, Parallelism: 1})
 	c.OnRequest(func(r *colly.Request) { r.Headers.Set("User-Agent", "MyResearchBot/1.0") })
 	return c
-}
-
-func segCount(path string) int {
-	return len(strings.FieldsFunc(strings.TrimSuffix(path, "/"), func(r rune) bool { return r == '/' }))
-}
-
-// fetchSubAreaPaths visits the area listing page and returns only valid sub-area paths
-// (exactly one segment deeper than city, starting with "A", e.g. "tokyo/A1301/A130101/").
-// Restaurant pages and pagination links are filtered out.
-func fetchSubAreaPaths(city string) []string {
-	targetUrl := "https://tabelog.com/tw/" + city
-	subAreas := []string{city}
-	seen := map[string]bool{city: true}
-	citySegs := segCount(city)
-
-	c := newCollector(3 * time.Second)
-
-	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		href := e.Attr("href")
-		href = strings.TrimPrefix(href, "https://tabelog.com")
-		href = strings.TrimPrefix(href, "/tw/")
-		if !strings.HasPrefix(href, city) || href == city {
-			return
-		}
-		path := strings.TrimSuffix(href, "/") + "/"
-		segs := strings.FieldsFunc(strings.TrimSuffix(path, "/"), func(r rune) bool { return r == '/' })
-		// Accept only paths with exactly one more segment than city,
-		// where the new segment is a sub-area code (starts with "A").
-		if len(segs) == citySegs+1 && strings.HasPrefix(segs[len(segs)-1], "A") && !seen[path] {
-			seen[path] = true
-			subAreas = append(subAreas, path)
-			fmt.Println("Found sub-area:", path)
-		}
-	})
-
-	c.Visit(targetUrl)
-	return subAreas
-}
-
-// fetchAreaPaths visits the prefecture top-level page and returns all area paths
-// (e.g. ["tokyo/A1301/", "tokyo/A1302/", ...]).
-func fetchAreaPaths(prefecture string) []string {
-	targetUrl := "https://tabelog.com/tw/" + prefecture + "/"
-	var areas []string
-	seen := map[string]bool{}
-
-	c := newCollector(3 * time.Second)
-
-	c.OnHTML("#tabs-panel-balloon-pref-area a.c-link-arrow", func(e *colly.HTMLElement) {
-		href := e.Attr("href")
-		href = strings.TrimPrefix(href, "/tw/")
-		// href looks like "tokyo/A1301/rstLst/?SrtT=rt" — strip from /rstLst onward
-		if idx := strings.Index(href, "/rstLst"); idx != -1 {
-			href = href[:idx+1] // "tokyo/A1301/"
-		}
-		if href != "" && !seen[href] {
-			seen[href] = true
-			areas = append(areas, href)
-			fmt.Println("Found area:", href)
-		}
-	})
-
-	c.Visit(targetUrl)
-	return areas
-}
-
-// fetchCategoryPaths visits an area listing page and returns per-category listing paths
-// (e.g. "tokyo/A1303/rstLst/washoku/?SrtT=rt"). These bypass Tabelog's 60-page-per-listing
-// cap by splitting restaurants by food type.
-func fetchCategoryPaths(areaPath string) []string {
-	targetUrl := "https://tabelog.com/tw/" + areaPath + "rstLst/?SrtT=rt"
-	var paths []string
-	seen := map[string]bool{}
-
-	c := newCollector(3 * time.Second)
-
-	c.OnHTML("#js-leftnavi-genre-scroll a.list-balloon__btn", func(e *colly.HTMLElement) {
-		href := e.Attr("href")
-		href = strings.TrimPrefix(href, "/tw/")
-		if strings.Contains(href, "/rstLst/") && !seen[href] {
-			seen[href] = true
-			paths = append(paths, href)
-		}
-	})
-
-	c.Visit(targetUrl)
-	return paths
-}
-
-// fetchUrlsFromArea crawls a listing page (with pagination) and appends discovered
-// restaurant URLs to filename. collected and mu guard against duplicates across
-// concurrent workers.
-func fetchUrlsFromArea(city string, filename string, collected map[string]bool, mu *sync.Mutex) {
-	visitedPages := make(map[string]bool)
-	targetUrl := "https://tabelog.com/tw/" + city
-
-	c := newCollector(5 * time.Second)
-
-	c.OnHTML("a.list-rst__rst-name-target.cpy-rst-name", func(e *colly.HTMLElement) {
-		rstUrl := e.Attr("href")
-
-		mu.Lock()
-		if collected[rstUrl] {
-			mu.Unlock()
-			return
-		}
-		collected[rstUrl] = true
-
-		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			mu.Unlock()
-			log.Fatal(err)
-		}
-		writer := csv.NewWriter(file)
-		writer.Write([]string{rstUrl})
-		writer.Flush()
-		file.Close()
-		mu.Unlock()
-	})
-
-	c.OnHTML("a.c-pagination__arrow--next", func(e *colly.HTMLElement) {
-		nextPage := e.Attr("href")
-		if !visitedPages[nextPage] {
-			fmt.Println("scraping:", nextPage)
-			visitedPages[nextPage] = true
-			e.Request.Visit(nextPage)
-		}
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		fmt.Println("Error on:", r.Request.URL)
-		fmt.Println("Status Code:", r.StatusCode)
-		if r.StatusCode == 429 {
-			fmt.Println("Retry-After:", r.Headers.Get("Retry-After"))
-		}
-		fmt.Println("Error:", err)
-	})
-
-	c.Visit(targetUrl)
-}
-
-// FetchRstUrls collects all restaurant URLs for a prefecture into filename.
-// Discovery (prefecture → areas → sub-areas + categories) runs with discoverWorkers
-// parallel goroutines; URL crawling runs with crawlWorkers parallel goroutines.
-func FetchRstUrls(prefecture string, filename string) {
-	fmt.Println("Fetching areas for prefecture:", prefecture)
-	areas := fetchAreaPaths(prefecture)
-	if len(areas) == 0 {
-		log.Fatalf("no areas found for prefecture %q — check the prefecture slug", prefecture)
-	}
-	fmt.Printf("Found %d areas\n", len(areas))
-
-	// Parallel discovery: sub-areas + categories per area
-	type areaResult struct {
-		subAreas []string
-		catPaths []string
-	}
-	results := make([]areaResult, len(areas))
-
-	var discoverWg sync.WaitGroup
-	discoverSem := make(chan struct{}, discoverWorkers)
-
-	for i, area := range areas {
-		discoverWg.Add(1)
-		discoverSem <- struct{}{}
-		go func(idx int, a string) {
-			defer discoverWg.Done()
-			defer func() { <-discoverSem }()
-			fmt.Printf("[%d/%d] Discovering paths for area: %s\n", idx+1, len(areas), a)
-			results[idx] = areaResult{
-				subAreas: fetchSubAreaPaths(a),
-				catPaths: fetchCategoryPaths(a),
-			}
-		}(i, area)
-	}
-	discoverWg.Wait()
-
-	var crawlPaths []string
-	for _, r := range results {
-		crawlPaths = append(crawlPaths, r.subAreas...)
-		crawlPaths = append(crawlPaths, r.catPaths...)
-	}
-	fmt.Printf("Total crawl paths: %d\n", len(crawlPaths))
-
-	// Load existing URLs for deduplication
-	collected := make(map[string]bool)
-	if existing, err := os.Open(filename); err == nil {
-		reader := csv.NewReader(existing)
-		records, _ := reader.ReadAll()
-		existing.Close()
-		for _, row := range records {
-			if len(row) > 0 {
-				collected[row[0]] = true
-			}
-		}
-		fmt.Printf("Loaded %d existing URLs from %s\n", len(collected), filename)
-	} else {
-		file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatal(err)
-		}
-		writer := csv.NewWriter(file)
-		writer.Write([]string{"url"})
-		writer.Flush()
-		file.Close()
-	}
-
-	// Parallel crawl
-	var mu sync.Mutex
-	var crawlWg sync.WaitGroup
-	crawlSem := make(chan struct{}, crawlWorkers)
-
-	for i, path := range crawlPaths {
-		crawlWg.Add(1)
-		crawlSem <- struct{}{}
-		go func(idx int, p string) {
-			defer crawlWg.Done()
-			defer func() { <-crawlSem }()
-			fmt.Printf("[%d/%d] Crawling: %s\n", idx+1, len(crawlPaths), p)
-			fetchUrlsFromArea(p, filename, collected, &mu)
-		}(i, path)
-	}
-	crawlWg.Wait()
-
-	mu.Lock()
-	total := len(collected)
-	mu.Unlock()
-	fmt.Printf("Done. Collected %d unique restaurant URLs.\n", total)
-}
-
-func fetchUrlsFromFullURL(targetUrl string, destFile string, collected map[string]bool, mu *sync.Mutex) {
-	visitedPages := make(map[string]bool)
-
-	c := newCollector(5 * time.Second)
-
-	c.OnHTML("a.list-rst__rst-name-target.cpy-rst-name", func(e *colly.HTMLElement) {
-		rstUrl := e.Attr("href")
-
-		mu.Lock()
-		if collected[rstUrl] {
-			mu.Unlock()
-			return
-		}
-		collected[rstUrl] = true
-
-		file, err := os.OpenFile(destFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			mu.Unlock()
-			log.Fatal(err)
-		}
-		writer := csv.NewWriter(file)
-		writer.Write([]string{rstUrl})
-		writer.Flush()
-		file.Close()
-		mu.Unlock()
-	})
-
-	c.OnHTML("a.c-pagination__arrow--next", func(e *colly.HTMLElement) {
-		nextPage := e.Attr("href")
-		if !visitedPages[nextPage] {
-			fmt.Println("scraping:", nextPage)
-			visitedPages[nextPage] = true
-			e.Request.Visit(nextPage)
-		}
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		fmt.Println("Error on:", r.Request.URL)
-		fmt.Println("Status Code:", r.StatusCode)
-		if r.StatusCode == 429 {
-			fmt.Println("Retry-After:", r.Headers.Get("Retry-After"))
-		}
-		fmt.Println("Error:", err)
-	})
-
-	c.Visit(targetUrl)
-}
-
-// FetchRstUrlsFromCSV reads listing page URLs from srcFile, crawls each one
-// (with pagination), and appends discovered restaurant URLs into destFile.
-func FetchRstUrlsFromCSV(srcFile string, destFile string) {
-	collected := make(map[string]bool)
-	var mu sync.Mutex
-
-	if f, err := os.Open(destFile); err == nil {
-		reader := csv.NewReader(f)
-		records, _ := reader.ReadAll()
-		f.Close()
-		for _, row := range records {
-			if len(row) > 0 {
-				collected[row[0]] = true
-			}
-		}
-		fmt.Printf("Loaded %d existing URLs from %s\n", len(collected), destFile)
-	} else {
-		f, err := os.OpenFile(destFile, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatal(err)
-		}
-		w := csv.NewWriter(f)
-		w.Write([]string{"url"})
-		w.Flush()
-		f.Close()
-	}
-
-	src, err := os.Open(srcFile)
-	if err != nil {
-		log.Fatalf("failed to open %s: %v", srcFile, err)
-	}
-	defer src.Close()
-
-	records, err := csv.NewReader(src).ReadAll()
-	if err != nil {
-		log.Fatalf("failed to read %s: %v", srcFile, err)
-	}
-
-	for i, row := range records {
-		if len(row) == 0 {
-			continue
-		}
-		listingUrl := strings.TrimSpace(row[0])
-		if listingUrl == "" || listingUrl == "urls" {
-			continue
-		}
-		fmt.Printf("[%d/%d] Crawling: %s\n", i, len(records)-1, listingUrl)
-		fetchUrlsFromFullURL(listingUrl, destFile, collected, &mu)
-	}
-
-	fmt.Printf("Done. Total unique restaurant URLs in %s: %d\n", destFile, len(collected))
 }
 
 func FetchRstInfo(url string, city string) (models.Restaurant, error) {
@@ -454,10 +116,18 @@ func FetchRstInfo(url string, city string) (models.Restaurant, error) {
 		}
 	})
 
-	c1.Visit(url)
+	if err := c1.Visit(url); err != nil {
+		if rateLimited {
+			return rst, ErrRateLimited
+		}
+		return rst, fmt.Errorf("fetch restaurant detail %s: %w", url, err)
+	}
 
 	if rateLimited {
 		return rst, ErrRateLimited
+	}
+	if strings.TrimSpace(rst.Name) == "" {
+		return rst, fmt.Errorf("fetch restaurant detail %s: restaurant name missing", url)
 	}
 
 	c2 := newCollector(5 * time.Second)
@@ -472,11 +142,131 @@ func FetchRstInfo(url string, city string) (models.Restaurant, error) {
 		rst.Longitude, _ = strconv.ParseFloat(e.Attr("data-lng"), 64)
 	})
 
-	c2.Visit(url + "/dtlmap/")
+	if err := c2.Visit(url + "/dtlmap/"); err != nil {
+		if rateLimited {
+			return rst, ErrRateLimited
+		}
+		return rst, fmt.Errorf("fetch restaurant map %s: %w", url, err)
+	}
 
 	if rateLimited {
 		return rst, ErrRateLimited
 	}
 
 	return rst, nil
+}
+
+// RestaurantJa holds Japanese-language fields scraped from the canonical
+// tabelog.com (non-/tw/) detail page. Pillow word is not included — it lives
+// on the list page and is harvested by a separate pass.
+type RestaurantJa struct {
+	Name           string
+	Alias          string
+	Address        string
+	NearestStation string
+	Kids           string
+	Categories     []string // JP names in DOM order
+}
+
+// JaURL converts a ZH (Taiwan) restaurant URL to its Japanese equivalent
+// by stripping the /tw/ prefix. Returns the input unchanged if no /tw/
+// segment is present.
+func JaURL(zhURL string) string {
+	return strings.Replace(zhURL, "tabelog.com/tw/", "tabelog.com/", 1)
+}
+
+// FetchRstInfoJa fetches Japanese-language fields for a restaurant from its
+// canonical (non-/tw/) tabelog page. Callers should pass a URL already
+// transformed via JaURL.
+func FetchRstInfoJa(url string) (RestaurantJa, error) {
+	var rst RestaurantJa
+	var rateLimited bool
+
+	c := newCollector(5 * time.Second)
+	c.OnError(func(r *colly.Response, err error) {
+		if r.StatusCode == 429 {
+			rateLimited = true
+		}
+	})
+
+	c.OnHTML(".rdheader-rstname h2.display-name", func(e *colly.HTMLElement) {
+		rst.Name = strings.TrimSpace(e.Text)
+	})
+	c.OnHTML(".rdheader-rstname .alias", func(e *colly.HTMLElement) {
+		rst.Alias = strings.TrimSpace(e.Text)
+	})
+	c.OnHTML(".rstinfo-table__address", func(e *colly.HTMLElement) {
+		rst.Address = strings.TrimSpace(e.Text)
+	})
+
+	c.OnHTML("dl.rdheader-subinfo__item", func(e *colly.HTMLElement) {
+		title := strings.TrimSpace(e.ChildText("dt.rdheader-subinfo__item-title"))
+		switch title {
+		case "最寄り駅：":
+			rst.NearestStation = strings.TrimSpace(e.ChildText(".linktree__parent-target-text"))
+		case "ジャンル：":
+			e.ForEach(".linktree__parent-target-text", func(_ int, el *colly.HTMLElement) {
+				rst.Categories = append(rst.Categories, strings.TrimSpace(el.Text))
+			})
+		}
+	})
+
+	c.OnHTML("table.rstinfo-table__table tr", func(e *colly.HTMLElement) {
+		if strings.TrimSpace(e.ChildText("th")) == "お子様連れ" {
+			rst.Kids = strings.TrimSpace(e.ChildText("td p"))
+		}
+	})
+
+	c.Visit(url)
+
+	if rateLimited {
+		return rst, ErrRateLimited
+	}
+	return rst, nil
+}
+
+// PillowEntry pairs a JP restaurant URL with its list-page PR text.
+type PillowEntry struct {
+	URL    string // canonical JP URL (no /tw/)
+	Pillow string
+}
+
+// FetchPillowsFromListing walks a JP listing page with pagination and invokes
+// sink for every <li> that has both a restaurant URL and a non-empty
+// pillow (PR title). Returns ErrRateLimited if any request hit HTTP 429.
+func FetchPillowsFromListing(listingURL string, sink func(PillowEntry)) error {
+	visited := map[string]bool{listingURL: true}
+	var rateLimited bool
+
+	c := newCollector(5 * time.Second)
+	c.OnError(func(r *colly.Response, err error) {
+		if r.StatusCode == 429 {
+			rateLimited = true
+		}
+	})
+
+	c.OnHTML("div.list-rst.js-rst-cassette-wrap", func(e *colly.HTMLElement) {
+		href := strings.TrimSpace(e.ChildAttr("a.list-rst__rst-name-target.cpy-rst-name", "href"))
+		pillow := strings.TrimSpace(e.ChildText(".list-rst__pr-title.cpy-pr-title"))
+		if href == "" || pillow == "" {
+			return
+		}
+		sink(PillowEntry{URL: href, Pillow: pillow})
+	})
+
+	c.OnHTML("a.c-pagination__arrow--next", func(e *colly.HTMLElement) {
+		next := e.Attr("href")
+		if next == "" || visited[next] {
+			return
+		}
+		visited[next] = true
+		e.Request.Visit(next)
+	})
+
+	c.Visit(listingURL)
+
+	if rateLimited {
+		return ErrRateLimited
+	}
+	return nil
 }

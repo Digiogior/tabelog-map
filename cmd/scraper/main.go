@@ -26,12 +26,22 @@ const (
 )
 
 func main() {
-	prefecture   := flag.String("prefecture", "", "Tabelog prefecture slug, e.g. tokyo or aichi (required)")
+	prefecture := flag.String("prefecture", "", "Tabelog prefecture slug, e.g. tokyo or aichi (required)")
 	urlsFileFlag := flag.String("urls-file", "", "Input CSV of restaurant URLs (default: {Prefecture}RstUrls.csv)")
-	dsnFlag      := flag.String("db", "", "PostgreSQL DSN (default: DATABASE_URL env, then localhost)")
-	retryErrors  := flag.Bool("retry-errors", false, "Retry URLs that previously failed")
-	workers      := flag.Int("workers", defaultWorkers, "Number of concurrent scrape workers")
-	collectURLs  := flag.Bool("collect-urls", false, "Run URL collection only, then exit")
+	dsnFlag := flag.String("db", "", "PostgreSQL DSN (default: DATABASE_URL env, then localhost)")
+	retryErrors := flag.Bool("retry-errors", false, "Retry URLs that previously failed")
+	workers := flag.Int("workers", defaultWorkers, "Number of concurrent scrape workers")
+	collectURLs := flag.Bool("collect-urls", false, "Run URL collection only, then exit")
+	stationFallbackURL := flag.String(
+		"station-fallback-url",
+		"",
+		"Capped sub-area × cuisine URL to recover with station partitions, then exit",
+	)
+	stationCategoryFallbackURL := flag.String(
+		"station-category-fallback-url",
+		"",
+		"Capped station URL to recover with cuisine-group partitions, then exit",
+	)
 	flag.Parse()
 
 	if *prefecture == "" {
@@ -46,7 +56,24 @@ func main() {
 	}
 
 	if *collectURLs {
-		scraper.FetchRstUrls(*prefecture, urlsFile)
+		if err := scraper.FetchRstUrls(*prefecture, urlsFile); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if *stationFallbackURL != "" {
+		if err := scraper.FetchStationFallbackURLs(*stationFallbackURL, urlsFile); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if *stationCategoryFallbackURL != "" {
+		if err := scraper.FetchStationCategoryFallbackURLs(
+			*stationCategoryFallbackURL,
+			urlsFile,
+		); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 

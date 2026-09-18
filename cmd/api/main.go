@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"tabelog-map/internal/api"
+	"tabelog-map/internal/db"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -22,6 +23,9 @@ func main() {
 
 	if err := conn.Ping(); err != nil {
 		log.Fatal("failed to connect to postgres:", err)
+	}
+	if err := db.CreateMenuTables(conn); err != nil {
+		log.Fatal("failed to initialize menu tables:", err)
 	}
 
 	api.StartServer(conn)

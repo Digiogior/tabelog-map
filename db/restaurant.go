@@ -63,12 +63,26 @@ func CreateTables(db *sql.DB) error {
 		return err
 	}
 
+	for _, col := range []string{
+		"name_ja", "alias_ja", "pillow_ja", "address_ja",
+		"nearest_station_ja", "kids_ja",
+	} {
+		if _, err := db.Exec(`ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS ` + col + ` TEXT`); err != nil {
+			return err
+		}
+	}
+
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS categories (
 			id BIGSERIAL PRIMARY KEY,
 			name TEXT UNIQUE
 		)
 	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`ALTER TABLE categories ADD COLUMN IF NOT EXISTS name_ja TEXT`)
 	if err != nil {
 		return err
 	}
@@ -176,10 +190,12 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 			name, address, alias, pillow, url, rating, latitude, longitude, location,
 			lunch_min_price, lunch_max_price,
 			dinner_min_price, dinner_max_price,
-			nearest_station, city, kids, photos
+			nearest_station, city, kids, photos,
+			name_ja, alias_ja, pillow_ja, address_ja, nearest_station_ja, kids_ja
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, ST_SetSRID(ST_MakePoint($8, $7), 4326),
-			$9, $10, $11, $12, $13, $14, $15, $16
+			$9, $10, $11, $12, $13, $14, $15, $16,
+			NULLIF($17, ''), NULLIF($18, ''), NULLIF($19, ''), NULLIF($20, ''), NULLIF($21, ''), NULLIF($22, '')
 		)
 		ON CONFLICT (url)
 		DO UPDATE SET
@@ -206,24 +222,35 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 		r.City,
 		r.Kids,
 		marshalPhotos(r.Photos),
+		r.NameJa,
+		r.AliasJa,
+		r.PillowWordJa,
+		r.AddressJa,
+		r.NearestStationJa,
+		r.KidsJa,
 	).Scan(&restaurantID)
 
 	if err != nil {
 		return 0, err
 	}
 
-	for _, c := range r.Categories {
+	for i, c := range r.Categories {
 		c = strings.TrimSpace(c)
+
+		var nameJa string
+		if i < len(r.CategoriesJa) {
+			nameJa = strings.TrimSpace(r.CategoriesJa[i])
+		}
 
 		var categoryID int64
 
 		// insert category if not exists, return id either way
 		err = db.QueryRow(`
-			INSERT INTO categories (name)
-			VALUES ($1)
-			ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+			INSERT INTO categories (name, name_ja)
+			VALUES ($1, NULLIF($2, ''))
+			ON CONFLICT (name) DO UPDATE SET name_ja = COALESCE(categories.name_ja, EXCLUDED.name_ja)
 			RETURNING id
-		`, c).Scan(&categoryID)
+		`, c, nameJa).Scan(&categoryID)
 
 		if err != nil {
 			return restaurantID, err

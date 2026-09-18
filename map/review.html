@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Food category review · Tabelog Map</title>
+  <link rel="stylesheet" href="review.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <a class="eyebrow" href="/">Tabelog Map</a>
+      <h1>Food category review</h1>
+    </div>
+    <div class="queue-stats" aria-label="Review queue statistics">
+      <span><strong id="pendingTasks">—</strong> restaurants left</span>
+      <span><strong id="completedTasks">—</strong> reviewed</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="loadingState" class="center-state" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Loading the next restaurant…</p>
+    </section>
+
+    <section id="emptyState" class="center-state" hidden>
+      <div class="empty-mark" aria-hidden="true">✓</div>
+      <h2>Queue complete</h2>
+      <p>There are no restaurants waiting for category review.</p>
+      <button id="refreshEmpty" class="button secondary" type="button">Check again</button>
+    </section>
+
+    <section id="errorState" class="center-state" hidden>
+      <div class="empty-mark error" aria-hidden="true">!</div>
+      <h2>Could not load the queue</h2>
+      <p id="errorMessage">Please try again.</p>
+      <button id="retryButton" class="button secondary" type="button">Retry</button>
+    </section>
+
+    <section id="reviewWorkspace" class="workspace" hidden>
+      <div class="evidence-column">
+        <div class="panel-heading">
+          <div>
+            <span class="step-label">Restaurant evidence</span>
+            <a id="restaurantLink" class="restaurant-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+          </div>
+          <span id="photoCounter" class="photo-counter"></span>
+        </div>
+
+        <div id="imageStage" class="image-stage">
+          <img id="menuImage" alt="Menu evidence" referrerpolicy="no-referrer">
+          <div id="structuredEvidence" class="structured-evidence" hidden>
+            <strong>Structured menu evidence</strong>
+            <p>This review was generated from menu text and has no source photo.</p>
+          </div>
+        </div>
+        <div id="photoStrip" class="photo-strip" aria-label="Menu photos"></div>
+
+        <section class="evidence-detail">
+          <span class="step-label">Selected evidence</span>
+          <h2 id="evidenceTitle">Choose a category</h2>
+          <div id="evidenceList" class="evidence-list">
+            <p class="muted">Select a category to inspect the supporting menu text.</p>
+          </div>
+        </section>
+      </div>
+
+      <form id="reviewForm" class="review-column">
+        <div class="panel-heading review-heading">
+          <div>
+            <span class="step-label">Suggested food types</span>
+            <h2 id="categoryCount">0 categories</h2>
+          </div>
+          <span id="reviewProgress" class="progress-pill">0 / 0 checked</span>
+        </div>
+
+        <div class="bulk-actions" aria-label="Bulk review actions">
+          <button id="approveAll" class="button compact secondary" type="button">Keep all</button>
+          <button id="rejectAll" class="button compact ghost-danger" type="button">Remove all</button>
+          <span class="bulk-hint">Every suggestion must be reviewed.</span>
+        </div>
+
+        <div id="categoryList" class="category-list"></div>
+
+        <section class="review-extra">
+          <div class="extra-block">
+            <div>
+              <span class="step-label">Model missed something?</span>
+              <h3>Add an existing category</h3>
+            </div>
+            <div class="inline-control">
+              <select id="missingCategory" aria-label="Missing food category"></select>
+              <button id="addMissingCategory" class="button compact secondary" type="button">Add</button>
+            </div>
+            <div id="additionList" class="tag-list"></div>
+          </div>
+
+          <details class="extra-block proposal-block">
+            <summary>Propose a category not in the taxonomy</summary>
+            <p class="muted">This creates a pending proposal. It does not create a searchable category automatically.</p>
+            <label>
+              Proposed name
+              <input id="proposalName" maxlength="100" placeholder="For example: Vietnamese rice-paper rolls">
+            </label>
+            <label>
+              Suggested parent <small>optional</small>
+              <select id="proposalParent"></select>
+            </label>
+            <label>
+              Explanation <small>optional</small>
+              <textarea id="proposalExplanation" rows="2" maxlength="500" placeholder="Why the existing categories do not fit"></textarea>
+            </label>
+            <button id="addProposal" class="button compact secondary" type="button">Add proposal</button>
+            <div id="proposalList" class="proposal-list"></div>
+          </details>
+
+          <label class="note-field">
+            <span>Reviewer note <small>optional</small></span>
+            <textarea id="reviewNote" rows="2" maxlength="1000" placeholder="For example: lower-right photo is partly obscured by glare"></textarea>
+          </label>
+        </section>
+
+        <div class="submit-bar">
+          <p id="submitHint" role="status">Review every category to continue.</p>
+          <button id="saveReview" class="button primary" type="submit" disabled>
+            <span class="button-label">Save &amp; next</span>
+            <span class="button-shortcut">⌘ Enter</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="review.js" defer></script>
+</body>
+</html>

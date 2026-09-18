@@ -24,7 +24,8 @@ Tabelog (tw)
 ```
 
 **Key design choices:**
-- Tabelog caps listing pages at 60 per URL. The scraper bypasses this by crawling each food-type category (sushi, yakiniku, ramen…) as a separate listing, then deduplicating URLs in memory.
+- Tabelog caps listing pages at 60 per URL. The scraper first splits by area and food type, then automatically crawls `sub-area × food type` when a listing reaches the cap.
+- Transient collection failures use bounded exponential backoff and honor `Retry-After`. Exhausted listing pages are saved in `{Prefecture}RstUrls.failed-paths.csv` and resumed before other paths on the next run.
 - URL collection and detail scraping are separate phases, both resumable.
 - Detail scraping uses 10 concurrent workers with automatic 429 backoff.
 - Scrape progress is tracked in the `scrape_progress` DB table — re-running any command resumes where it left off.
@@ -49,7 +50,7 @@ tabelog-map/
 │   ├── index.html               ← Frontend
 │   └── map.js                   ← Mapbox integration
 ├── models/restaurant.go         ← Restaurant struct
-├── menu_scraper.py              ← VLM-based menu item scraper (optional)
+├── menu_scraper.py              ← OCR/VLM food-category classifier (optional)
 ├── {Prefecture}RstUrls.csv      ← Collected restaurant URLs per city
 └── docker-compose.yml           ← PostgreSQL 18 + PostGIS
 ```
@@ -65,6 +66,10 @@ tabelog-map/
 | `restaurant_categories` | Many-to-many join |
 | `menu_items` | Menu items extracted by VLM scraper |
 | `menu_scrape_log` | Per-restaurant menu scrape status |
+| `food_types` | Controlled multilingual food taxonomy |
+| `food_category_review_*` | Restaurant-level category tasks, candidates, photos, and evidence |
+| `restaurant_food_types` | Human-approved searchable restaurant food types |
+| `food_taxonomy_proposals` | Pending reviewer proposals for taxonomy administrators |
 | `scrape_progress` | Per-URL detail scrape status (pending / done / error) |
 | `cities` | Registered prefectures with display name and map center |
 
@@ -140,7 +145,9 @@ Listens on `:8080`.
 ### 5. Open the map
 
 Open `map/index.html` in a browser. The map:
-- Requests your location and shows restaurants within 1.5km as clustered markers
+- Explains why location is useful before requesting browser permission
+- Shows restaurants within 1.5km as clustered markers after the user shares a location or chooses an area
+- Supports station, neighborhood, city, and address search plus a **Search this area** map fallback when location is blocked
 - Tapping a marker opens a bottom sheet with name, address, rating, price range, photo thumbnails, and links to Tabelog and Google Maps
 - Category chip bar along the top shows the 10 most common categories; tap **More** to search all 500+
 - Swipe down or tap the map to dismiss the bottom sheet
@@ -168,34 +175,94 @@ Returns all category names sorted alphabetically.
 
 Returns the 10 categories with the most restaurants.
 
+### `GET /api/food-types`
+
+Returns the active controlled food taxonomy with English, Japanese, and
+Traditional Chinese labels, search aliases, and parent metadata. Child labels
+are displayed as paths such as `Dessert › Cake`.
+
+### `GET /api/food-type-search?q=Salad`
+
+Resolves a localized label, alias, or taxonomy slug and returns restaurants
+whose human-approved menu categories match it. Parent searches recursively
+include approved child categories, so a search for `Dessert` also finds a
+restaurant tagged with `Cake`. Pending model suggestions are never returned.
+
 ---
 
-## Menu Scraper (Optional)
+## Food Category Pipeline (Optional)
 
-`menu_scraper.py` extracts menu items from restaurant photo pages using a VLM (Gemini Flash via NVIDIA Inference API). It tries HTML-based extraction first and falls back to image analysis.
+`menu_scraper.py` classifies restaurant menu evidence into controlled,
+searchable food types such as `Salad › Meat salad`, `Skewers › Yakitori`, and
+`Fried food › Fried chicken`. It does not publish individual dish names or
+prices. Drink-only menus are ignored.
+
+Existing dish-review evidence is reused by default so previously paid OCR work
+does not need to be repeated. When no reusable evidence exists, Mistral OCR 4
+reads four overlapping photo tiles and Gemini 3.6 Flash maps exact evidence to
+the taxonomy in `internal/db/food_taxonomy.json`.
 
 **Setup:**
 ```bash
-pip install -r requirements.txt
-# Add NVIDIA_Inference_Key to .env
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# Add MISTRAL_KEY and NVIDIA_Inference_Key to .env
 ```
 
 **Run:**
 ```bash
 # All pending restaurants
-python menu_scraper.py
-
-# Target a specific city
-python menu_scraper.py --prefecture osaka
+.venv/bin/python menu_scraper.py
 
 # Split across multiple machines (e.g. 4 machines × 5000 restaurants)
-python menu_scraper.py --offset 0     --limit 5000   # machine 1
-python menu_scraper.py --offset 5000  --limit 5000   # machine 2
-python menu_scraper.py --offset 10000 --limit 5000   # machine 3
-python menu_scraper.py --offset 15000 --limit 5000   # machine 4
+.venv/bin/python menu_scraper.py --offset 0     --limit 5000
+.venv/bin/python menu_scraper.py --offset 5000  --limit 5000
+
+# Convert legacy photo/dish review evidence without rerunning OCR
+.venv/bin/python menu_scraper.py --migrate-legacy-reviews
+
+# Reclassify one restaurant and replace only its pending category review
+.venv/bin/python menu_scraper.py \
+  --restaurant-url https://tabelog.com/tw/aichi/A2301/A230108/23045697/ \
+  --refresh-reviews
+
+# Force the live tiled OCR path instead of reusing legacy evidence
+MENU_MAX_PHOTOS=1 .venv/bin/python menu_scraper.py \
+  --restaurant-url https://tabelog.com/tw/aichi/A2301/A230108/23045697/ \
+  --refresh-reviews \
+  --force-live-ocr
 ```
 
-Menu search is available via `GET /api/menu-search?q=ビール` (trigram similarity).
+Classification results from all usable photos are aggregated into one pending
+review task per restaurant. Refresh replaces only a pending task; completed
+human decisions are never overwritten. The classifier chooses the most
+specific supported child and uses a parent only when the evidence is too
+ambiguous for a subtype. Redundant parent candidates are removed because
+parent searches already include their descendants.
+
+### Human food-category review
+
+Start the API and open the review page:
+
+```bash
+go run ./cmd/api
+# http://localhost:8080/review.html
+```
+
+The page shows all usable menu photos beside deduplicated food categories for
+one restaurant. Every suggestion must be kept, changed to another existing
+taxonomy category, or removed. Reviewers can add a missed existing category or
+submit a pending taxonomy proposal. Saving publishes only confirmed categories
+to `restaurant_food_types`.
+
+Review queue endpoints:
+
+- `GET /api/food-category-reviews/next`
+- `GET /api/food-category-reviews/stats`
+- `POST /api/food-category-reviews/{id}`
+
+The original photo-level `menu_review_*` and `menu_items` tables remain as
+migration and audit history.
 
 ---
 

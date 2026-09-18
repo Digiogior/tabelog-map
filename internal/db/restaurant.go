@@ -69,11 +69,46 @@ func CreateTables(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`
+		ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS good_for_kids BOOLEAN
+		GENERATED ALWAYS AS (
+			CASE
+				WHEN kids IS NULL OR btrim(kids) = '' THEN false
+				WHEN kids ~ '不|禁止|謝絕|未滿|未成年|NG|20歲以下' THEN false
+				WHEN kids ~ '歡迎兒童|有兒童菜單|可攜帶嬰兒車|兒童座椅|歡迎帶孩子|可以帶孩子|兒童可|孩子也可以|沒有問題' THEN true
+				WHEN btrim(kids) IN ('可','可。','可以','可以。','OK','非常歡迎','歡迎','可能的') THEN true
+				ELSE false
+			END
+		) STORED
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_restaurants_good_for_kids ON restaurants(good_for_kids) WHERE good_for_kids = true`)
+	if err != nil {
+		return err
+	}
+
+	for _, col := range []string{
+		"name_ja", "alias_ja", "pillow_ja", "address_ja",
+		"nearest_station_ja", "kids_ja",
+	} {
+		if _, err := db.Exec(`ALTER TABLE restaurants ADD COLUMN IF NOT EXISTS ` + col + ` TEXT`); err != nil {
+			return err
+		}
+	}
+
+	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS categories (
 			id BIGSERIAL PRIMARY KEY,
 			name TEXT UNIQUE
 		)
 	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`ALTER TABLE categories ADD COLUMN IF NOT EXISTS name_ja TEXT`)
 	if err != nil {
 		return err
 	}
@@ -155,10 +190,12 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 			name, address, alias, pillow, url, rating, latitude, longitude, location,
 			lunch_min_price, lunch_max_price,
 			dinner_min_price, dinner_max_price,
-			nearest_station, city, kids, photos
+			nearest_station, city, kids, photos,
+			name_ja, alias_ja, pillow_ja, address_ja, nearest_station_ja, kids_ja
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, ST_SetSRID(ST_MakePoint($8, $7), 4326),
-			$9, $10, $11, $12, $13, $14, $15, $16
+			$9, $10, $11, $12, $13, $14, $15, $16,
+			NULLIF($17, ''), NULLIF($18, ''), NULLIF($19, ''), NULLIF($20, ''), NULLIF($21, ''), NULLIF($22, '')
 		)
 		ON CONFLICT (url)
 		DO UPDATE SET
@@ -185,23 +222,34 @@ func InsertRestaurant(db *sql.DB, r models.Restaurant) (int64, error) {
 		r.City,
 		r.Kids,
 		marshalPhotos(r.Photos),
+		r.NameJa,
+		r.AliasJa,
+		r.PillowWordJa,
+		r.AddressJa,
+		r.NearestStationJa,
+		r.KidsJa,
 	).Scan(&restaurantID)
 
 	if err != nil {
 		return 0, err
 	}
 
-	for _, c := range r.Categories {
+	for i, c := range r.Categories {
 		c = strings.TrimSpace(c)
+
+		var nameJa string
+		if i < len(r.CategoriesJa) {
+			nameJa = strings.TrimSpace(r.CategoriesJa[i])
+		}
 
 		var categoryID int64
 
 		err = db.QueryRow(`
-			INSERT INTO categories (name)
-			VALUES ($1)
-			ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+			INSERT INTO categories (name, name_ja)
+			VALUES ($1, NULLIF($2, ''))
+			ON CONFLICT (name) DO UPDATE SET name_ja = COALESCE(categories.name_ja, EXCLUDED.name_ja)
 			RETURNING id
-		`, c).Scan(&categoryID)
+		`, c, nameJa).Scan(&categoryID)
 
 		if err != nil {
 			return restaurantID, err
@@ -269,7 +317,7 @@ func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, catego
 		SELECT r.name, r.address, r.url, r.rating, r.latitude, r.longitude,
 		       r.lunch_min_price, r.lunch_max_price,
 		       r.dinner_min_price, r.dinner_max_price,
-		       r.nearest_station, r.city, r.kids, r.photos, r.id
+		       r.nearest_station, r.city, r.kids, r.good_for_kids, r.photos, r.id
 		FROM restaurants r
 	`
 	args := []interface{}{lng, lat, radiusMeters}
@@ -324,6 +372,7 @@ func GetNearbyRestaurants(db *sql.DB, lat, lng float64, radiusMeters int, catego
 			&r.NearestStation,
 			&r.City,
 			&r.Kids,
+			&r.GoodForKids,
 			&photos,
 			&id,
 		)

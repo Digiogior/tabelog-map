@@ -2,6 +2,6 @@ beautifulsoup4
 dotenv
 httpx
 openai
+Pillow
 psycopg2-binary
-rapidfuzz
 requests

@@ -20,6 +20,8 @@ func CreateMenuTables(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS menu_items_restaurant_id_idx ON menu_items(restaurant_id)`,
 		`CREATE INDEX IF NOT EXISTS menu_items_name_trgm_idx ON menu_items USING GIN (name gin_trgm_ops)`,
+		`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS name_ja TEXT`,
+		`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS description_ja TEXT`,
 		`CREATE TABLE IF NOT EXISTS menu_scrape_log (
 			restaurant_id BIGINT PRIMARY KEY REFERENCES restaurants(id) ON DELETE CASCADE,
 			status        TEXT NOT NULL,
@@ -28,13 +30,44 @@ func CreateMenuTables(db *sql.DB) error {
 			attempted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			completed_at  TIMESTAMPTZ
 		)`,
+		`CREATE TABLE IF NOT EXISTS menu_review_tasks (
+			id              BIGSERIAL PRIMARY KEY,
+			restaurant_id   BIGINT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+			image_url       TEXT NOT NULL,
+			source_page_url TEXT NOT NULL DEFAULT '',
+			status          TEXT NOT NULL DEFAULT 'pending'
+			                CHECK (status IN ('pending', 'completed')),
+			reviewer_note   TEXT,
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			reviewed_at     TIMESTAMPTZ,
+			UNIQUE (restaurant_id, image_url)
+		)`,
+		`CREATE INDEX IF NOT EXISTS menu_review_tasks_status_id_idx
+		 ON menu_review_tasks(status, id)`,
+		`CREATE TABLE IF NOT EXISTS menu_review_items (
+			id                 BIGSERIAL PRIMARY KEY,
+			review_task_id     BIGINT NOT NULL REFERENCES menu_review_tasks(id) ON DELETE CASCADE,
+			extracted_name     TEXT NOT NULL,
+			reviewed_name      TEXT,
+			decision           TEXT NOT NULL DEFAULT 'pending'
+			                   CHECK (decision IN ('pending', 'approved', 'rejected', 'edited')),
+			evidence_block_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
+			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			reviewed_at        TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS menu_review_items_task_id_idx
+		 ON menu_review_items(review_task_id, id)`,
+		`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS review_item_id BIGINT
+		 REFERENCES menu_review_items(id) ON DELETE SET NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS menu_items_review_item_id_idx
+		 ON menu_items(review_item_id) WHERE review_item_id IS NOT NULL`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
 	}
-	return nil
+	return CreateFoodCategoryTables(db)
 }
 
 func SearchMenuItems(db *sql.DB, query string, limit int) ([]models.MenuSearchResult, error) {

@@ -22,7 +22,7 @@ var stubRestaurants = []models.Restaurant{
 }
 
 func TestGetRestaurants_Success(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -52,7 +52,7 @@ func TestGetRestaurants_Success(t *testing.T) {
 }
 
 func TestGetRestaurants_EmptyResult(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return nil, nil
 	}
 
@@ -78,7 +78,7 @@ func TestGetRestaurants_EmptyResult(t *testing.T) {
 }
 
 func TestGetRestaurants_MissingLat(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -93,7 +93,7 @@ func TestGetRestaurants_MissingLat(t *testing.T) {
 }
 
 func TestGetRestaurants_MissingLng(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -108,7 +108,7 @@ func TestGetRestaurants_MissingLng(t *testing.T) {
 }
 
 func TestGetRestaurants_InvalidLat(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -123,7 +123,7 @@ func TestGetRestaurants_InvalidLat(t *testing.T) {
 }
 
 func TestGetRestaurants_InvalidLng(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -138,7 +138,7 @@ func TestGetRestaurants_InvalidLng(t *testing.T) {
 }
 
 func TestGetRestaurants_DBError(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return nil, errors.New("db connection failed")
 	}
 
@@ -153,7 +153,7 @@ func TestGetRestaurants_DBError(t *testing.T) {
 }
 
 func TestGetRestaurants_CORSHeader(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 
@@ -169,7 +169,7 @@ func TestGetRestaurants_CORSHeader(t *testing.T) {
 }
 
 func TestGetRestaurants_ContentTypeHeader(t *testing.T) {
-	fetcher := func(lat, lng float64) ([]models.Restaurant, error) {
+	fetcher := func(lat, lng float64, category, prefecture string) ([]models.Restaurant, error) {
 		return stubRestaurants, nil
 	}
 

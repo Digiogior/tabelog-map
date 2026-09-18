@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"tabelog-map/internal/service"
@@ -28,15 +29,53 @@ func StartServer(conn *sql.DB) {
 	menuFetcher := func(query string) ([]models.MenuSearchResult, error) {
 		return service.SearchMenuItems(conn, query)
 	}
+	reviewFetcher := func() (*models.MenuReviewTask, error) {
+		return service.GetNextMenuReview(conn)
+	}
+	reviewStatsFetcher := func() (models.MenuReviewStats, error) {
+		return service.GetMenuReviewStats(conn)
+	}
+	reviewSaver := func(taskID int64, submission models.MenuReviewSubmission) error {
+		return service.SaveMenuReview(conn, taskID, submission)
+	}
+	foodTypesFetcher := func() ([]models.FoodType, error) {
+		return service.ListFoodTypes(conn)
+	}
+	foodTypeSearch := func(query string) ([]models.FoodTypeSearchResult, error) {
+		return service.SearchRestaurantsByFoodType(conn, query)
+	}
+	foodCategoryReviewFetcher := func() (*models.FoodCategoryReviewTask, error) {
+		return service.GetNextFoodCategoryReview(conn)
+	}
+	foodCategoryReviewStatsFetcher := func() (models.FoodCategoryReviewStats, error) {
+		return service.GetFoodCategoryReviewStats(conn)
+	}
+	foodCategoryReviewSaver := func(taskID int64, submission models.FoodCategoryReviewSubmission) error {
+		return service.SaveFoodCategoryReview(conn, taskID, submission)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/restaurants", handleGetRestaurants(fetcher))
 	mux.HandleFunc("/api/categories", handleGetCategories(catFetcher))
 	mux.HandleFunc("/api/categories/top", handleGetCategories(topCatFetcher))
 	mux.HandleFunc("/api/menu-search", handleMenuSearch(menuFetcher))
+	mux.HandleFunc("/api/menu-reviews/next", handleGetNextMenuReview(reviewFetcher))
+	mux.HandleFunc("/api/menu-reviews/stats", handleGetMenuReviewStats(reviewStatsFetcher))
+	mux.HandleFunc("/api/menu-reviews/", handleSaveMenuReview(reviewSaver))
+	mux.HandleFunc("/api/food-types", handleGetFoodTypes(foodTypesFetcher))
+	mux.HandleFunc("/api/food-type-search", handleFoodTypeSearch(foodTypeSearch))
+	mux.HandleFunc("/api/food-category-reviews/next", handleGetNextFoodCategoryReview(foodCategoryReviewFetcher))
+	mux.HandleFunc("/api/food-category-reviews/stats", handleGetFoodCategoryReviewStats(foodCategoryReviewStatsFetcher))
+	mux.HandleFunc("/api/food-category-reviews/", handleSaveFoodCategoryReview(foodCategoryReviewSaver))
+	mux.Handle("/", http.FileServer(http.Dir("map")))
 
-	log.Println("API server listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	address := ":" + port
+	log.Printf("API server listening on %s", address)
+	if err := http.ListenAndServe(address, mux); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -48,7 +87,7 @@ func handleGetRestaurants(fetch restaurantFetcher) http.HandlerFunc {
 
 		latStr := r.URL.Query().Get("lat")
 		lngStr := r.URL.Query().Get("lng")
-		category   := r.URL.Query().Get("category")
+		category := r.URL.Query().Get("category")
 		prefecture := r.URL.Query().Get("prefecture")
 
 		lat, err := strconv.ParseFloat(latStr, 64)

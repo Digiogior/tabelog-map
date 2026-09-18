@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>UI Sketch – Top 5 Restaurants</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    h1 {
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      opacity: 0.6;
+    }
+
+    /* ── Phone frame ── */
+    .phone {
+      width: 390px;
+      height: 844px;
+      background: #e8e8e8;
+      border-radius: 52px;
+      border: 10px solid #111;
+      box-shadow: 0 0 0 2px #333, 0 30px 80px rgba(0,0,0,0.6);
+      position: relative;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    /* notch */
+    .phone::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 120px; height: 34px;
+      background: #111;
+      border-radius: 0 0 20px 20px;
+      z-index: 100;
+    }
+
+    /* ── Map background ── */
+    .map-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(rgba(220,210,200,0.9), rgba(220,210,200,0.9)),
+        repeating-linear-gradient(0deg, transparent, transparent 39px, #ccc 39px, #ccc 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, #ccc 39px, #ccc 40px);
+      background-color: #e8dfd0;
+    }
+
+    /* fake roads */
+    .map-bg::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(105deg, transparent 30%, #fff 30%, #fff 32%, transparent 32%),
+        linear-gradient(  5deg, transparent 45%, #fff 45%, #fff 48%, transparent 48%),
+        linear-gradient( 75deg, transparent 60%, #fff 60%, #fff 62%, transparent 62%),
+        linear-gradient(135deg, transparent 20%, #fff 20%, #fff 22%, transparent 22%);
+      opacity: 0.6;
+    }
+
+    /* map pins */
+    .pin {
+      position: absolute;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #e74c3c;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .pin.selected {
+      background: #c0392b;
+      width: 18px; height: 18px;
+      box-shadow: 0 0 0 4px rgba(192,57,43,0.25);
+    }
+    .pin.cluster {
+      width: 36px; height: 36px;
+      background: #e74c3c;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      border: 2px solid #fff;
+    }
+
+    /* user dot */
+    .user-dot {
+      position: absolute;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: #007cbf;
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 4px rgba(0,124,191,0.25);
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 50px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 0 28px 6px;
+      z-index: 20;
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    /* ── Category chips ── */
+    .category-chips {
+      position: absolute;
+      top: 56px; left: 0; right: 0;
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px;
+      overflow-x: auto;
+      z-index: 10;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .category-chips::-webkit-scrollbar { display: none; }
+
+    .chip {
+      flex-shrink: 0;
+      background: #fff;
+      border: none;
+      border-radius: 20px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #333;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+      cursor: pointer;
+      transition: all 0.18s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .chip.active {
+      background: #e74c3c;
+      color: #fff;
+    }
+    .chip:active { transform: scale(0.95); }
+
+    /* ── Top-5 strip ── */
+    .top5-strip {
+      position: absolute;
+      bottom: 100px;
+      left: 0; right: 0;
+      z-index: 10;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+    }
+
+    .top5-strip.hidden {
+      transform: translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .top5-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #555;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0 14px 6px;
+    }
+
+    .top5-cards {
+      display: flex;
+      gap: 10px;
+      padding: 4px 14px 12px;
+      overflow-x: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .top5-cards::-webkit-scrollbar { display: none; }
+
+    .rest-card {
+      flex-shrink: 0;
+      width: 150px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s;
+      user-select: none;
+    }
+    .rest-card:active { transform: scale(0.96); }
+
+    .card-img {
+      width: 100%;
+      height: 88px;
+      object-fit: cover;
+      display: block;
+      background: #ddd;
+      position: relative;
+    }
+
+    .card-img-placeholder {
+      width: 100%;
+      height: 88px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    .card-rank {
+      position: absolute;
+      top: 6px; left: 6px;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(2px);
+    }
+
+    .card-body {
+      padding: 8px 10px 10px;
+    }
+    .card-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .card-rating {
+      font-size: 12px;
+      color: #e74c3c;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .card-price {
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* ── Map controls (bottom-right) ── */
+    .map-controls {
+      position: absolute;
+      bottom: 110px;
+      right: 14px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .map-btn {
+      width: 36px; height: 36px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    /* ── Bottom sheet ── */
+    .bottom-sheet {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      background: #fff;
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+      z-index: 50;
+      max-height: 72%;
+      overflow-y: auto;
+      transform: translateY(100%);
+      transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .bottom-sheet.open {
+      transform: translateY(0);
+    }
+
+    .bs-handle {
+      width: 36px; height: 4px;
+      background: #ddd;
+      border-radius: 2px;
+      margin: 10px auto 0;
+    }
+
+    .bs-header {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+    }
+
+    .bs-info { flex: 1; min-width: 0; }
+
+    .bs-name {
+      font-size: 17px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 3px;
+    }
+    .bs-address {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 5px;
+    }
+    .bs-cats {
+      font-size: 12px;
+      color: #e74c3c;
+      margin-bottom: 6px;
+    }
+    .bs-meta {
+      font-size: 13px;
+      color: #333;
+      font-weight: 600;
+    }
+    .bs-prices {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .bs-photo {
+      width: 90px;
+      height: 90px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #f0f0f0;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+
+    .bs-divider {
+      height: 1px;
+      background: #f0f0f0;
+      margin: 0 16px;
+    }
+
+    .bs-actions {
+      display: flex;
+      gap: 10px;
+      padding: 14px 16px 20px;
+    }
+    .bs-btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 12px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: opacity 0.15s;
+    }
+    .bs-btn:active { opacity: 0.7; }
+    .bs-btn.primary { background: #e74c3c; color: #fff; }
+    .bs-btn.secondary { background: #f2f2f2; color: #333; }
+
+    /* ── Overlay ── */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 40;
+      display: none;
+    }
+    .overlay.visible { display: block; }
+
+    /* ── Annotation callouts ── */
+    .annotations {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .anno {
+      position: absolute;
+      background: rgba(0,0,0,0.72);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      letter-spacing: 0.03em;
+    }
+    .anno::after {
+      content: "";
+      position: absolute;
+      border: 5px solid transparent;
+    }
+    .anno.right::after {
+      left: 100%;
+      top: 50%;
+      transform: translateY(-50%);
+      border-left-color: rgba(0,0,0,0.72);
+    }
+    .anno.left::after {
+      right: 100%;
+      top: 50%;
+      transform: translateY(-50%);
+      border-right-color: rgba(0,0,0,0.72);
+    }
+    .anno.bottom::after {
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border-top-color: rgba(0,0,0,0.72);
+    }
+
+    /* ── State switcher (outside phone) ── */
+    .state-switcher {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .state-btn {
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1.5px solid rgba(255,255,255,0.3);
+      background: transparent;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s;
+      opacity: 0.6;
+    }
+    .state-btn.active {
+      background: #fff;
+      color: #1a1a2e;
+      opacity: 1;
+    }
+
+    .legend {
+      color: rgba(255,255,255,0.45);
+      font-size: 11px;
+      margin-top: 10px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<h1>UI Sketch · Top 5 Strip</h1>
+
+<div class="phone" id="phone">
+
+  <!-- Map background -->
+  <div class="map-bg"></div>
+
+  <!-- Map pins -->
+  <div class="pin" style="top:180px;left:80px"></div>
+  <div class="pin" style="top:220px;left:200px"></div>
+  <div class="pin selected" id="selected-pin" style="top:300px;left:160px;display:none"></div>
+  <div class="pin cluster" style="top:250px;left:280px">5</div>
+  <div class="pin" style="top:350px;left:100px"></div>
+  <div class="pin" style="top:400px;left:240px"></div>
+  <div class="user-dot" style="top:370px;left:180px"></div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span>9:41</span>
+    <span>●●● 5G 🔋</span>
+  </div>
+
+  <!-- Category chips -->
+  <div class="category-chips">
+    <div class="chip" onclick="selectAll(this)">All</div>
+    <div class="chip active" onclick="selectChip(this)">燒肉</div>
+    <div class="chip" onclick="selectChip(this)">壽司</div>
+    <div class="chip" onclick="selectChip(this)">拉麵</div>
+    <div class="chip" onclick="selectChip(this)">居酒屋</div>
+    <div class="chip" onclick="selectChip(this)">天婦羅</div>
+    <div class="chip" onclick="selectChip(this)">More ▾</div>
+  </div>
+
+  <!-- Top 5 strip -->
+  <div class="top5-strip" id="top5-strip">
+    <div class="top5-label" id="strip-label">Top 5 in 燒肉</div>
+    <div class="top5-cards">
+
+      <div class="rest-card" onclick="openSheet(0)">
+        <div style="position:relative">
+          <div class="card-img-placeholder" style="background:#fde8e8;">🥩</div>
+          <div class="card-rank">1</div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">炭火焼肉 山田</div>
+          <div class="card-rating">⭐ 4.8</div>
+          <div class="card-price">¥3,000〜5,000</div>
+        </div>
+      </div>
+
+      <div class="rest-card" onclick="openSheet(1)">
+        <div style="position:relative">
+          <div class="card-img-placeholder" style="background:#fff3e0;">🔥</div>
+          <div class="card-rank">2</div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">焼肉の王様</div>
+          <div class="card-rating">⭐ 4.6</div>
+          <div class="card-price">¥2,500〜4,000</div>
+        </div>
+      </div>
+
+      <div class="rest-card" onclick="openSheet(2)">
+        <div style="position:relative">
+          <div class="card-img-placeholder" style="background:#fce4ec;">🍖</div>
+          <div class="card-rank">3</div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">黒毛和牛 寿楽</div>
+          <div class="card-rating">⭐ 4.5</div>
+          <div class="card-price">¥5,000〜8,000</div>
+        </div>
+      </div>
+
+      <div class="rest-card" onclick="openSheet(3)">
+        <div style="position:relative">
+          <div class="card-img-placeholder" style="background:#f3e5f5;">🍴</div>
+          <div class="card-rank">4</div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">牛角 名古屋店</div>
+          <div class="card-rating">⭐ 4.3</div>
+          <div class="card-price">¥2,000〜3,500</div>
+        </div>
+      </div>
+
+      <div class="rest-card" onclick="openSheet(4)">
+        <div style="position:relative">
+          <div class="card-img-placeholder" style="background:#e8f5e9;">🫕</div>
+          <div class="card-rank">5</div>
+        </div>
+        <div class="card-body">
+          <div class="card-name">炭焼き一番</div>
+          <div class="card-rating">⭐ 4.2</div>
+          <div class="card-price">¥1,800〜3,000</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Map controls -->
+  <div class="map-controls">
+    <div class="map-btn">＋</div>
+    <div class="map-btn">－</div>
+    <div class="map-btn">◎</div>
+  </div>
+
+  <!-- Overlay to close sheet -->
+  <div class="overlay" id="overlay" onclick="closeSheet()"></div>
+
+  <!-- Bottom sheet (restaurant detail) -->
+  <div class="bottom-sheet" id="bottom-sheet">
+    <div class="bs-handle"></div>
+    <div class="bs-header">
+      <div class="bs-info">
+        <div class="bs-name" id="bs-name">炭火焼肉 山田</div>
+        <div class="bs-address">名古屋市中区栄3-1-1</div>
+        <div class="bs-cats">燒肉 · 和牛</div>
+        <div class="bs-prices">
+          <span>🍱 Lunch: ¥1,500〜2,500</span>
+          <span>🍽 Dinner: ¥3,000〜5,000</span>
+        </div>
+        <div class="bs-meta" id="bs-rating">⭐ 4.8 &nbsp;·&nbsp; 👶 OK</div>
+      </div>
+      <div class="bs-photo">🥩</div>
+    </div>
+    <div class="bs-divider"></div>
+    <div class="bs-actions">
+      <button class="bs-btn primary">📍 Google Maps</button>
+      <button class="bs-btn secondary">🍽 Tabelog</button>
+    </div>
+  </div>
+
+  <!-- Annotations layer -->
+  <div class="annotations" id="annotations">
+    <div class="anno right" style="top:64px;left:18px">Category chips (scrollable)</div>
+    <div class="anno left" style="top:64px;right:18px;display:none" id="anno-sheet">Swipe down to close</div>
+  </div>
+
+</div>
+
+<!-- State tabs -->
+<div class="state-switcher">
+  <button class="state-btn active" onclick="setView('browse')">① Browse</button>
+  <button class="state-btn" onclick="setView('strip')">② Top 5 visible</button>
+  <button class="state-btn" onclick="setView('detail')">③ Card tapped</button>
+</div>
+<div class="legend">Tap cards or tabs to preview each state</div>
+
+<script>
+  const restaurants = [
+    { name:"炭火焼肉 山田", rating:"4.8", emoji:"🥩" },
+    { name:"焼肉の王様",    rating:"4.6", emoji:"🔥" },
+    { name:"黒毛和牛 寿楽", rating:"4.5", emoji:"🍖" },
+    { name:"牛角 名古屋店", rating:"4.3", emoji:"🍴" },
+    { name:"炭焼き一番",   rating:"4.2", emoji:"🫕" },
+  ];
+
+  function setView(view) {
+    document.querySelectorAll(".state-btn").forEach(b => b.classList.remove("active"));
+    event.target.classList.add("active");
+
+    const strip  = document.getElementById("top5-strip");
+    const sheet  = document.getElementById("bottom-sheet");
+    const overlay = document.getElementById("overlay");
+    const pin    = document.getElementById("selected-pin");
+    const chips  = document.querySelector(".category-chips");
+
+    // reset
+    strip.classList.remove("hidden");
+    sheet.classList.remove("open");
+    overlay.classList.remove("visible");
+    pin.style.display = "none";
+
+    if (view === "browse") {
+      // No category selected – hide strip, chips all unselected
+      strip.classList.add("hidden");
+      chips.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chips.querySelectorAll(".chip")[0].classList.add("active"); // "All"
+    } else if (view === "strip") {
+      // Category active, strip visible
+      chips.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chips.querySelectorAll(".chip")[1].classList.add("active"); // 燒肉
+    } else if (view === "detail") {
+      // Card tapped → bottom sheet open, pin shown
+      chips.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chips.querySelectorAll(".chip")[1].classList.add("active");
+      pin.style.display = "block";
+      sheet.classList.add("open");
+      overlay.classList.add("visible");
+    }
+  }
+
+  function selectChip(el) {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    el.classList.add("active");
+    const label = document.getElementById("strip-label");
+    label.textContent = "Top 5 in " + el.textContent;
+    document.getElementById("top5-strip").classList.remove("hidden");
+    closeSheet();
+  }
+
+  function selectAll(el) {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    el.classList.add("active");
+    document.getElementById("top5-strip").classList.add("hidden");
+    closeSheet();
+  }
+
+  function openSheet(idx) {
+    const r = restaurants[idx];
+    document.getElementById("bs-name").textContent = r.name;
+    document.getElementById("bs-rating").innerHTML = `⭐ ${r.rating} &nbsp;·&nbsp; 👶 OK`;
+    document.getElementById("selected-pin").style.display = "block";
+    document.getElementById("bottom-sheet").classList.add("open");
+    document.getElementById("overlay").classList.add("visible");
+  }
+
+  function closeSheet() {
+    document.getElementById("bottom-sheet").classList.remove("open");
+    document.getElementById("overlay").classList.remove("visible");
+    document.getElementById("selected-pin").style.display = "none";
+  }
+</script>
+</body>
+</html>

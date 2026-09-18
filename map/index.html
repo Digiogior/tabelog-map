@@ -2,12 +2,18 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Mapbox GL JS map</title>
+<title>Nearby restaurants</title>
 <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.js"></script>
 <style>
-body { margin: 0; padding: 0; }
+body {
+  margin: 0;
+  padding: 0;
+  background: #f7f4ef;
+  color: #1f1f1f;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 #map { position: absolute; top: 0; bottom: 0; width: 100%; }
 
 /* Category chip row */
@@ -31,11 +37,11 @@ body { margin: 0; padding: 0; }
 
 .category-chip {
   flex-shrink: 0;
-  padding: 6px 14px;
+  padding: 9px 18px;
   background: white;
   border-radius: 20px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -46,6 +52,34 @@ body { margin: 0; padding: 0; }
 .category-chip.active {
   background: #e74c3c;
   color: white;
+}
+
+/* Filter chip row (below category chips) */
+.filter-chips {
+  position: absolute;
+  top: 62px;
+  left: 10px;
+  right: 52px;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 0 4px;
+}
+
+.filter-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-chip-star {
+  color: #f5b300;
+  margin-right: 3px;
+}
+
+.category-chip.active .filter-chip-star {
+  color: #fff;
 }
 
 /* Category bottom sheet */
@@ -194,13 +228,13 @@ body { margin: 0; padding: 0; }
 }
 
 .bs-name {
-  font-size: 17px;
+  font-size: 19px;
   font-weight: bold;
 }
 
 
 .bs-address {
-  font-size: 14px;
+  font-size: 15px;
   color: #555;
   margin-bottom: 6px;
 }
@@ -213,23 +247,23 @@ body { margin: 0; padding: 0; }
 
 .bs-action-btn {
   flex: 1;
-  padding: 8px;
+  padding: 10px;
   background: #fff;
   border: 1.5px solid #e74c3c;
   border-radius: 10px;
   color: #e74c3c;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   text-align: center;
   text-decoration: none;
-  min-height: 40px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .bs-categories {
-  font-size: 13px;
+  font-size: 14px;
   color: #e74c3c;
   margin-bottom: 6px;
 }
@@ -242,12 +276,12 @@ body { margin: 0; padding: 0; }
 }
 
 .bs-price-item {
-  font-size: 13px;
+  font-size: 14px;
   color: #555;
 }
 
 .bs-meta {
-  font-size: 14px;
+  font-size: 15px;
   color: #333;
   margin-top: 4px;
 }
@@ -292,12 +326,618 @@ body { margin: 0; padding: 0; }
   min-width: 0;
 }
 
+/* Top 5 strip */
+#top5-strip {
+  position: fixed;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#top5-strip.hidden {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+}
+
+.top5-header {
+  display: flex;
+  align-items: center;
+  padding: 0 10px 6px 14px;
+}
+
+.top5-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: #444;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 3px rgba(255,255,255,0.85);
+}
+
+.top5-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.top5-cards {
+  display: flex;
+  gap: 10px;
+  padding: 2px 14px 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  height: calc(28vh - 44px);
+  align-items: stretch;
+}
+
+.top5-cards::-webkit-scrollbar {
+  display: none;
+}
+
+.top5-card {
+  flex-shrink: 0;
+  width: 40vw;
+  height: 100%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.top5-card.active {
+  border-color: #e74c3c;
+  box-shadow: 0 2px 14px rgba(231,76,60,0.3);
+}
+
+.top5-card-img-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.top5-card-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.top5-card-photo-empty {
+  background: #f0f0f0;
+  height: 100%;
+}
+
+.top5-card-rank {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.top5-card-body {
+  padding: 7px 9px 9px;
+  flex-shrink: 0;
+}
+
+.top5-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.top5-card-rating {
+  font-size: 13px;
+  color: #e74c3c;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.top5-card-price {
+  font-size: 12px;
+  color: #888;
+}
+
+@media (min-width: 600px) {
+  .top5-card { width: 20vw; }
+}
+
+@media (max-width: 650px) {
+  .category-chip { font-size: 3.5vw; padding: 2vw 3.5vw; }
+  .top5-label { font-size: 4.5vw; }
+  .top5-close { width: 8vw; height: 8vw; font-size: 4vw; }
+  .top5-card-body { padding: 2vw 3vw; }
+  .top5-card-name { font-size: 4.5vw; }
+  .top5-card-rating { font-size: 4vw; }
+  .top5-card-price { font-size: 3.5vw; }
+  .top5-card-rank { width: 6vw; height: 6vw; font-size: 3vw; }
+  .filter-chips { top: 68px; }
+  #bottom-sheet { padding: 10px 16px 28px; }
+  .bs-name { font-size: 4vw; }
+  .bs-address { font-size: 3vw; }
+  .bs-categories { font-size: 3vw; }
+  .bs-price-item { font-size: 3vw; }
+  .bs-meta { font-size: 3.5vw; }
+  .bs-action-btn { font-size: 3.5vw; padding: 10px; min-height: 40px; }
+  .bs-photo-main { height: 90px; }
+  .bs-photo-thumb { height: 60px; }
+  .bs-photos { width: 130px; }
+}
+
+/* Locating banner */
+#locating-banner {
+  display: none;
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  box-sizing: border-box;
+  background: rgba(31,31,31,0.9);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 11px 18px;
+  border-radius: 14px;
+  z-index: 100;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  text-align: center;
+}
+
+#locating-banner.hidden {
+  opacity: 0;
+}
+
+/* Locate button */
+#locate-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#locate-btn:active {
+  background: #f5f5f5;
+}
+
+/* Location onboarding and recovery */
+.location-flow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 50% 24%, rgba(231,76,60,0.12), transparent 34%),
+    #f7f4ef;
+}
+
+.location-flow-overlay[hidden] {
+  display: none;
+}
+
+.location-card {
+  width: min(100%, 390px);
+  max-height: calc(100vh - 48px);
+  box-sizing: border-box;
+  padding: 28px 24px 24px;
+  overflow-y: auto;
+  border: 1px solid rgba(31,31,31,0.08);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(42,31,26,0.14);
+  text-align: center;
+}
+
+.location-card-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  border-radius: 18px;
+  background: #fff0ee;
+  color: #e74c3c;
+  font-size: 28px;
+}
+
+.location-card h1 {
+  margin: 0 0 10px;
+  font-size: 25px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.location-card-copy {
+  margin: 0 auto 22px;
+  color: #65605d;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.location-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.location-button {
+  width: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 11px 16px;
+  border: 1.5px solid #ded9d5;
+  border-radius: 14px;
+  background: #fff;
+  color: #2b2928;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.location-button.primary {
+  border-color: #e74c3c;
+  background: #e74c3c;
+  color: #fff;
+}
+
+.location-button.tertiary {
+  min-height: 40px;
+  padding: 7px 12px;
+  border-color: transparent;
+  color: #706a67;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.location-privacy {
+  margin: 16px 0 0;
+  color: #8a8480;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.permission-steps {
+  margin: 0 0 22px;
+  padding-left: 22px;
+  color: #55504d;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.permission-steps li + li {
+  margin-top: 8px;
+}
+
+/* Manual area picker */
+.area-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  box-sizing: border-box;
+  background: rgba(28,24,22,0.36);
+}
+
+.area-picker-overlay[hidden] {
+  display: none;
+}
+
+.area-picker-sheet {
+  width: min(100%, 520px);
+  max-height: min(88vh, 720px);
+  box-sizing: border-box;
+  padding: 12px 20px max(24px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  border-radius: 24px 24px 0 0;
+  background: #fff;
+  box-shadow: 0 -12px 50px rgba(27,22,20,0.2);
+}
+
+.area-picker-handle {
+  width: 42px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 4px;
+  background: #d8d3d0;
+}
+
+.area-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.area-picker-header h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 22px;
+}
+
+.area-picker-close {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: #f2efed;
+  color: #373331;
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.area-search-form {
+  display: flex;
+  gap: 8px;
+}
+
+.area-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1.5px solid #d8d3d0;
+  border-radius: 13px;
+  outline: none;
+  font: inherit;
+  font-size: 16px;
+  -webkit-appearance: none;
+}
+
+.area-search-input:focus {
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 3px rgba(231,76,60,0.1);
+}
+
+.area-search-submit {
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 13px;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.area-search-status {
+  min-height: 20px;
+  margin: 9px 2px 2px;
+  color: #77716d;
+  font-size: 13px;
+}
+
+.area-results {
+  display: grid;
+  gap: 2px;
+}
+
+.area-result {
+  display: block;
+  width: 100%;
+  padding: 13px 4px;
+  border: 0;
+  border-bottom: 1px solid #efedeb;
+  background: #fff;
+  color: #262321;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.area-result-name {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.area-result-address {
+  display: block;
+  margin-top: 3px;
+  color: #77716d;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.area-attribution {
+  margin: 7px 2px 0;
+  color: #99928e;
+  font-size: 10px;
+  text-align: right;
+}
+
+.area-section-title {
+  margin: 20px 0 10px;
+  color: #5d5754;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.popular-areas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.popular-area {
+  padding: 9px 13px;
+  border: 1px solid #ddd8d4;
+  border-radius: 999px;
+  background: #fff;
+  color: #373331;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.choose-map-button {
+  margin-top: 18px;
+}
+
+#change-area-btn {
+  position: fixed;
+  bottom: 24px;
+  left: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 46px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 23px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  color: #333;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#search-area-btn {
+  position: fixed;
+  top: 116px;
+  left: 50%;
+  z-index: 7;
+  transform: translateX(-50%);
+  min-height: 42px;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 22px;
+  background: #24211f;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#search-area-btn[hidden] {
+  display: none;
+}
+
+@media (min-width: 650px) {
+  .area-picker-overlay {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .area-picker-sheet {
+    border-radius: 24px;
+  }
+}
+
 </style>
 </head>
 <body>
 <div id="map"></div>
-<script src="config.js"></script>
-<script src="map.js"></script>
+<div id="locating-banner" role="status" aria-live="polite">Locating...</div>
+
+<div id="location-dialog" class="location-flow-overlay" role="dialog" aria-modal="true" aria-labelledby="location-title" aria-describedby="location-copy">
+  <div class="location-card">
+    <div id="location-icon" class="location-card-icon" aria-hidden="true">📍</div>
+    <h1 id="location-title">Find restaurants near you</h1>
+    <p id="location-copy" class="location-card-copy">Use your location to show nearby restaurants, or choose an area without sharing your location.</p>
+    <div id="location-extra"></div>
+    <div id="location-actions" class="location-actions"></div>
+    <p id="location-privacy" class="location-privacy">Your location is used only to load nearby restaurants.</p>
+  </div>
+</div>
+
+<div id="area-picker" class="area-picker-overlay" hidden>
+  <section class="area-picker-sheet" role="dialog" aria-modal="true" aria-labelledby="area-picker-title">
+    <div class="area-picker-handle" aria-hidden="true"></div>
+    <header class="area-picker-header">
+      <h2 id="area-picker-title">Choose an area</h2>
+      <button id="area-picker-close" class="area-picker-close" type="button" aria-label="Close area picker">✕</button>
+    </header>
+    <form id="area-search-form" class="area-search-form" role="search">
+      <input id="area-search-input" class="area-search-input" type="search" maxlength="256" placeholder="Station, neighborhood, city, or address" autocomplete="off" aria-label="Search for an area in Japan">
+      <button class="area-search-submit" type="submit" aria-label="Search">⌕</button>
+    </form>
+    <div id="area-search-status" class="area-search-status" role="status" aria-live="polite"></div>
+    <div id="area-search-results" class="area-results"></div>
+    <div id="area-attribution" class="area-attribution" hidden>Search results © Mapbox</div>
+    <h3 class="area-section-title">Popular areas</h3>
+    <div class="popular-areas">
+      <button class="popular-area" type="button" data-label="Shinjuku" data-lng="139.7006" data-lat="35.6900">Shinjuku</button>
+      <button class="popular-area" type="button" data-label="Shibuya" data-lng="139.7016" data-lat="35.6580">Shibuya</button>
+      <button class="popular-area" type="button" data-label="Ginza" data-lng="139.7671" data-lat="35.6717">Ginza</button>
+      <button class="popular-area" type="button" data-label="Osaka" data-lng="135.5023" data-lat="34.6937">Osaka</button>
+      <button class="popular-area" type="button" data-label="Nagoya" data-lng="136.9066" data-lat="35.1815">Nagoya</button>
+      <button class="popular-area" type="button" data-label="Kyoto" data-lng="135.7681" data-lat="35.0116">Kyoto</button>
+      <button class="popular-area" type="button" data-label="Fukuoka" data-lng="130.4017" data-lat="33.5904">Fukuoka</button>
+    </div>
+    <button id="choose-on-map" class="location-button choose-map-button" type="button">Choose on map</button>
+  </section>
+</div>
+<script src="config.js?v=3"></script>
+<script src="map.js?v=10"></script>
 
 </body>
 </html>
